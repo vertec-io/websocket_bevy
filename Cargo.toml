@@ -1,0 +1,14 @@
+[package]
+name = "websocket_bevy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy={version="0.13"}
+bevy_eventwork = {git="https://github.com/vertec-io/bevy_eventwork", branch="main"}
+bevy_eventwork_mod_websockets = {git="https://github.com/vertec-io/bevy_eventwork_mod_websockets", branch="main"}
+serde = { version = "1.0.203", features = ["derive"] }
+url = "2.5.0"
+
+[features]
+client=[]
