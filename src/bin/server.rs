@@ -4,12 +4,22 @@ use bevy_eventwork::{ConnectionId, EventworkRuntime, Network, NetworkData, Netwo
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use bevy_eventwork_mod_websockets::{NetworkSettings, WebSocketProvider};
 use websocket_bevy::shared;
-// mod shared;
+use bevy::prelude::*;
 
+
+
+//plugins 4 state and event system
+use bevy_states::states::StatePlugin;
+use bevy_states::states::MachineState;
+use bevy_states::events::{send_simple_event, EventTypes, SimpleEvent, SimpleEventPlugin};
+
+#[derive(Resource, Default)]
+struct PreviousState(Option<MachineState>);
 pub fn main() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, bevy::log::LogPlugin::default()));
+    app.add_plugins((MinimalPlugins, bevy::log::LogPlugin::default(), bevy::input::InputPlugin::default()
 
+));
     // Before we can register the potential message types, we
     // need to add the plugin
     app.add_plugins(bevy_eventwork::EventworkPlugin::<
@@ -32,8 +42,46 @@ pub fn main() {
     // We have to insert the WS [`NetworkSettings`] with our chosen settings.
     app.insert_resource(NetworkSettings::default());
 
+    //these are for the state and event systems
+    app.add_plugins(StatePlugin);
+    app.add_plugins(SimpleEventPlugin);
+
+
+    //state change detection system
+    app.insert_resource(PreviousState::default());
+    app.add_systems(Update, check_state_change);
+
+
     app.run();
 }
+
+
+
+
+fn check_state_change(
+    current_state: Res<State<MachineState>>,
+    mut previous_state: ResMut<PreviousState>,
+    net: Res<Network<WebSocketProvider>>,
+
+) {
+    let current = current_state.get();
+    if previous_state.0.as_ref() != Some(current) {
+        println!("state update system reporting: State now is : {:?}", current);
+        let message = format!("State has changed to {:?}", current_state);
+
+        net.broadcast(shared::NewChatMessage {
+            name: String::from("SERVER"),
+            
+            message: String::from(message),
+        });
+        previous_state.0 = Some(current.clone());
+    }
+}
+
+
+
+
+
 
 // On the server side, you need to setup networking. You do not need to do so at startup, and can start listening
 // at any time.
@@ -63,6 +111,7 @@ fn setup_networking(
     info!("Started listening for new connections!");
 }
 
+
 #[derive(Component)]
 struct Player(ConnectionId);
 
@@ -87,8 +136,14 @@ fn handle_connection_events(
 
 // Receiving a new message is as simple as listening for events of `NetworkData<T>`
 fn handle_messages(
+    mut state_messages: EventReader<NetworkData<shared::StateChangeMessage>>,
     mut new_messages: EventReader<NetworkData<shared::UserChatMessage>>,
     net: Res<Network<WebSocketProvider>>,
+    state: Res<State<MachineState>>,
+    mut event_writer: EventWriter<SimpleEvent>,
+
+
+
 ) {
     for message in new_messages.read() {
         let user = message.source();
@@ -98,6 +153,41 @@ fn handle_messages(
         net.broadcast(shared::NewChatMessage {
             name: format!("{}", user),
             message: message.message.clone(),
+        });        
+    }
+    //this is the handler for state messages recieved it takes the request and message and sends a state event with the same request and message
+    for message in state_messages.read() {
+        let user = message.source();
+
+        info!("Received message from user: {:?}", message.event_type);
+        let event_type = convert_event_type(message.event_type.clone());
+
+        net.broadcast(shared::StateChangeMessage {
+            event_type: message.event_type.clone(),
         });
+        
+        send_simple_event(&mut event_writer, event_type);
+
+        //println!("state: {:?}", state);
+
+    }
+
+
+}
+
+//this feels unneccesary but will state for now
+//this maps the button hit from statemessage to the state that needs to be changed
+fn convert_event_type(event: shared::EventThatHappened) -> EventTypes {
+    match event {
+        shared::EventThatHappened::Start => EventTypes::Start,
+        shared::EventThatHappened::Stop => EventTypes::Stop,
+        shared::EventThatHappened::Emergency => EventTypes::Emergency,
+        shared::EventThatHappened::PauseButtonHit => EventTypes::PauseButtonHit,
+        shared::EventThatHappened::Power => EventTypes::Power,
     }
 }
+
+
+
+
+

@@ -6,12 +6,13 @@ use bevy::{
 };
 use bevy_eventwork::{ConnectionId, EventworkRuntime, Network, NetworkData, NetworkEvent};
 use bevy_eventwork_mod_websockets::{NetworkSettings, WebSocketProvider};
-use websocket_bevy::shared;
+use websocket_bevy::shared::{self,EventThatHappened};
 
 // mod shared;
 
 pub fn main() {
     let mut app = App::new();
+
 
     app.add_plugins(DefaultPlugins);
 
@@ -40,6 +41,10 @@ pub fn main() {
             handle_message_button,
             handle_incoming_messages,
             handle_network_events,
+            emergency_button,
+            pause_button,
+            start_button,
+            stop_button
         ),
     );
 
@@ -48,6 +53,7 @@ pub fn main() {
 
     app.init_resource::<GlobalChatSettings>();
 
+    //this may be how we can make the ui update in trigger instead of update 
     app.add_systems(PostUpdate, handle_chat_area);
 
     app.run();
@@ -62,6 +68,7 @@ struct NetworkTaskPool(TaskPool);
 
 fn handle_incoming_messages(
     mut messages: Query<&mut GameChatMessages>,
+    mut state_messages: EventReader<NetworkData<shared::StateChangeMessage>>,
     mut new_messages: EventReader<NetworkData<shared::NewChatMessage>>,
 ) {
     let mut messages = messages.get_single_mut().unwrap();
@@ -69,7 +76,13 @@ fn handle_incoming_messages(
     for new_message in new_messages.read() {
         messages.add(UserMessage::new(&new_message.name, &new_message.message));
     }
+    for state_message in state_messages.read() {
+        info!("Received new state: {:?}", state_message.event_type);
+        messages.add(SystemMessage::new(format!("State change request to: {:?}", state_message.event_type)));
+    }
 }
+
+
 
 fn handle_network_events(
     mut new_network_events: EventReader<NetworkEvent>,
@@ -203,9 +216,20 @@ impl<T> ChatMessages<T> {
 
 type GameChatMessages = ChatMessages<ChatMessage>;
 
+#[derive(Component)]
+struct ListOfStateRequests<T> {
+    list_of_requests: Vec<T>,
+}
+
+
 ///////////////////////////////////////////////////////////////
 ////////////// UI Definitions/Handlers ////////////////////////
 ///////////////////////////////////////////////////////////////
+
+
+
+
+
 
 #[derive(Component)]
 struct ConnectButton;
@@ -278,6 +302,132 @@ fn handle_message_button(
         }
     }
 }
+#[derive(Component)]
+struct EmergencyButton;
+fn emergency_button(
+    net: Res<Network<WebSocketProvider>>,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<EmergencyButton>)>,
+    mut messages: Query<&mut GameChatMessages>) {
+
+    let mut messages = if let Ok(messages) = messages.get_single_mut() {
+        messages
+    } else {
+        return;
+    };
+
+    for interaction in interaction_query.iter() {
+        if let Interaction::Pressed = interaction {
+            match net.send_message(
+                ConnectionId { id: 0 },
+                shared::StateChangeMessage {
+                    event_type: EventThatHappened::Emergency,
+
+                },
+            ) {
+                Ok(()) => (),
+                Err(err) => messages.add(SystemMessage::new(format!(
+                    "Could not send Emergency event EXIT AREA IMMEDIATLY: {}",
+                    err
+                ))),
+            }
+        }
+    }
+}
+#[derive(Component)]
+struct PauseButton;
+fn pause_button(
+    net: Res<Network<WebSocketProvider>>,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<PauseButton>)>,
+    mut messages: Query<&mut GameChatMessages>,
+) {
+    let mut messages = if let Ok(messages) = messages.get_single_mut() {
+        messages
+    } else {
+        return;
+    };
+
+    for interaction in interaction_query.iter() {
+        if let Interaction::Pressed = interaction {
+            match net.send_message(
+                ConnectionId { id: 0 },
+                shared::StateChangeMessage {
+                    event_type: EventThatHappened::PauseButtonHit,
+
+                },
+            ) {
+                Ok(()) => (),
+                Err(err) => messages.add(SystemMessage::new(format!(
+                    "Could not send pause request: {}",
+                    err
+                ))),
+            }
+        }
+    }
+}
+#[derive(Component)]
+struct StartButton;
+fn start_button(
+    net: Res<Network<WebSocketProvider>>,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
+    mut messages: Query<&mut GameChatMessages>,
+) {
+    let mut messages = if let Ok(messages) = messages.get_single_mut() {
+        messages
+    } else {
+        return;
+    };
+
+    for interaction in interaction_query.iter() {
+        if let Interaction::Pressed = interaction {
+            match net.send_message(
+                ConnectionId { id: 0 },
+                shared::StateChangeMessage {
+                    event_type: EventThatHappened::Start,
+
+                },
+            ) {
+                Ok(()) => (),
+                Err(err) => messages.add(SystemMessage::new(format!(
+                    "Could not send start request: {}",
+                    err
+                ))),
+            }
+        }
+    }
+}
+
+#[derive(Component)]
+struct Stop;
+fn stop_button(
+    net: Res<Network<WebSocketProvider>>,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<Stop>)>,
+    mut messages: Query<&mut GameChatMessages>,
+) {
+    let mut messages = if let Ok(messages) = messages.get_single_mut() {
+        messages
+    } else {
+        return;
+    };
+
+    for interaction in interaction_query.iter() {
+        if let Interaction::Pressed = interaction {
+            match net.send_message(
+                ConnectionId { id: 0 },
+                shared::StateChangeMessage {
+                    event_type: EventThatHappened::Stop,
+
+                },
+            ) {
+                Ok(()) => (),
+                Err(err) => messages.add(SystemMessage::new(format!(
+                    "Could not send stop request: {}",
+                    err
+                ))),
+            }
+        }
+    }
+}
+
 
 #[derive(Component)]
 struct ChatArea;
@@ -337,7 +487,7 @@ fn setup_ui(mut commands: Commands, _materials: ResMut<Assets<ColorMaterial>>) {
                 .spawn(NodeBundle {
                     style: Style {
                         width: Val::Percent(100.0),
-                        height: Val::Percent(90.0),
+                        height: Val::Percent(66.6), 
                         ..Default::default()
                     },
                     ..Default::default()
@@ -403,6 +553,136 @@ fn setup_ui(mut commands: Commands, _materials: ResMut<Assets<ColorMaterial>>) {
                             button.spawn(TextBundle {
                                 text: Text::from_section(
                                     "Connect to server",
+                                    TextStyle {
+                                        font_size: 40.,
+                                        color: Color::BLACK,
+                                        ..default()
+                                    },
+                                )
+                                .with_justify(JustifyText::Center),
+                                ..Default::default()
+                            });
+                        });
+                });
+            parent
+                .spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(10.0),
+                        ..Default::default()
+                    },
+                    background_color: Color::DARK_GRAY.into(),
+                    ..Default::default()
+                })
+                .with_children(|parent_button_bar| {
+                    parent_button_bar
+                        .spawn(ButtonBundle {
+                            style: Style {
+                                width: Val::Percent(50.0),
+                                height: Val::Percent(100.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .insert(PauseButton)
+                        .with_children(|button| {
+                            button.spawn(TextBundle {
+                                text: Text::from_section(
+                                    "Pause",
+                                    TextStyle {
+                                        font_size: 40.,
+                                        color: Color::BLACK,
+                                        ..default()
+                                    },
+                                )
+                                .with_justify(JustifyText::Center),
+                                ..Default::default()
+                            });
+                        });
+
+                    parent_button_bar
+                        .spawn(ButtonBundle {
+                            style: Style {
+                                width: Val::Percent(50.0),
+                                height: Val::Percent(100.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .insert(EmergencyButton)
+                        .with_children(|button| {
+                            button.spawn(TextBundle {
+                                text: Text::from_section(
+                                    "Emergency",
+                                    TextStyle {
+                                        font_size: 40.,
+                                        color: Color::BLACK,
+                                        ..default()
+                                    },
+                                )
+                                .with_justify(JustifyText::Center),
+                                ..Default::default()
+                            });
+                        });
+                });
+                parent
+                .spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(11.11), 
+                        ..Default::default()
+                    },
+                    background_color: Color::DARK_GRAY.into(),
+                    ..Default::default()
+                })
+                .with_children(|parent_button_row| {
+                    parent_button_row
+                        .spawn(ButtonBundle {
+                            style: Style {
+                                width: Val::Percent(50.0),
+                                height: Val::Percent(100.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .insert(StartButton)
+                        .with_children(|button| {
+                            button.spawn(TextBundle {
+                                text: Text::from_section(
+                                    "Start",
+                                    TextStyle {
+                                        font_size: 40.,
+                                        color: Color::BLACK,
+                                        ..default()
+                                    },
+                                )
+                                .with_justify(JustifyText::Center),
+                                ..Default::default()
+                            });
+                        });
+
+                    parent_button_row
+                        .spawn(ButtonBundle {
+                            style: Style {
+                                width: Val::Percent(50.0),
+                                height: Val::Percent(100.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .insert(Stop)
+                        .with_children(|button| {
+                            button.spawn(TextBundle {
+                                text: Text::from_section(
+                                    "Stop",
                                     TextStyle {
                                         font_size: 40.,
                                         color: Color::BLACK,
